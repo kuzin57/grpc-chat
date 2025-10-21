@@ -99,10 +99,16 @@ def main():
             to_nickname = input("Введите имя получателя: ")
             message = input("Введите сообщение: ")
             client.send_message(message, nickname, to_nickname)
-        elif command == "get_received_messages":
+        elif command == "received":
             client.get_received_messages(nickname)
-        elif command == "get_sent_messages":
+        elif command == "sent":
             client.get_sent_messages(nickname)
+        elif command == "help":
+            print("help - показать список команд")
+            print("exit - выйти из месенджера")
+            print("send - отправить сообщение")
+            print("received - получить полученные сообщения")
+            print("sent - получить отправленные сообщения")
         else:
             print("Неизвестная команда")
 
