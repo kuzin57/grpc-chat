@@ -1,11 +1,7 @@
 #!/usr/bin/env python3
-"""
-Простой gRPC клиент для тестирования основных методов Messenger сервиса
-"""
 
 import grpc
 import sys
-import time
 from generated import messenger_pb2
 from generated import messenger_pb2_grpc
 
@@ -82,7 +78,6 @@ class MessengerClient:
 
 
 def main():
-    """Основная функция для демонстрации клиента"""
     if len(sys.argv) < 2:
         print("Использование: python simple_client.py <server_address>")
         print("Пример: python simple_client.py localhost:8080")
@@ -93,42 +88,23 @@ def main():
 
     if not client.connect():
         sys.exit(1)
-
-    try:
-        print("\n=== Тестирование gRPC Messenger клиента ===\n")
-
-        # Тест 1: Отправка сообщений
-        print("1. Отправка сообщений...")
-        client.send_message("Привет, Алиса!", "Боб", "Алиса")
-        client.send_message("Привет, Боб!", "Алиса", "Боб")
-        client.send_message("Как дела?", "Боб", "Алиса")
-
-        time.sleep(1)  # Небольшая пауза
-
-        # Тест 2: Получение сообщений для Алисы
-        print("\n2. Получение сообщений для Алисы...")
-        client.get_received_messages("Алиса")
-
-        # Тест 3: Получение сообщений для Боба
-        print("\n3. Получение сообщений для Боба...")
-        client.get_received_messages("Боб")
-
-        # Тест 4: Получение отправленных сообщений от Алисы
-        print("\n4. Отправленные сообщения от Алисы...")
-        client.get_sent_messages("Алиса")
-
-        # Тест 5: Получение отправленных сообщений от Боба
-        print("\n5. Отправленные сообщения от Боба...")
-        client.get_sent_messages("Боб")
-
-        print("\n✅ Все тесты завершены!")
-
-    except KeyboardInterrupt:
-        print("\n\n⏹️  Прервано пользователем")
-    except Exception as e:
-        print(f"\n❌ Неожиданная ошибка: {e}")
-    finally:
-        client.disconnect()
+        
+    nickname = input("Введите ваше имя: ")
+    
+    while True:
+        command = input(f"{nickname} >> ")
+        if command == "exit":
+            break
+        elif command == "send":
+            to_nickname = input("Введите имя получателя: ")
+            message = input("Введите сообщение: ")
+            client.send_message(message, nickname, to_nickname)
+        elif command == "get_received_messages":
+            client.get_received_messages(nickname)
+        elif command == "get_sent_messages":
+            client.get_sent_messages(nickname)
+        else:
+            print("Неизвестная команда")
 
 
 if __name__ == "__main__":
