@@ -19,4 +19,4 @@ RUN rm -rf github.com internal
 
 RUN cd server && go build -o main ./internal/cmd
 
-CMD ["./main -config ./server/config/config.yaml"]
+CMD ["./server/main", "-config", "./server/config/config.yaml"]

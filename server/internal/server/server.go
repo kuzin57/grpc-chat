@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"log"
 	"time"
 
 	"github.com/kuzin57/grpc-chat/server/internal/entities"
@@ -26,6 +27,8 @@ func NewServer(messagesService MessagesService) *Server {
 }
 
 func (s *Server) SendMessage(ctx context.Context, req *generated.SendMessageRequest) (*generated.SendMessageResponse, error) {
+	log.Println("Sending message:", req.Message, "from", req.FromNickname, "to", req.ToNickname)
+
 	messageID, err := s.messagesService.SendMessage(ctx, req.Message, req.FromNickname, req.ToNickname)
 	if err != nil {
 		return nil, err
@@ -37,6 +40,8 @@ func (s *Server) SendMessage(ctx context.Context, req *generated.SendMessageRequ
 }
 
 func (s *Server) GetReceivedMessages(ctx context.Context, req *generated.GetReceivedMessagesRequest) (*generated.GetReceivedMessagesResponse, error) {
+	log.Println("Getting received messages for:", req.Nickname)
+
 	messages, err := s.messagesService.GetReceivedMessages(ctx, req.Nickname)
 	if err != nil {
 		return nil, err
@@ -56,6 +61,8 @@ func (s *Server) GetReceivedMessages(ctx context.Context, req *generated.GetRece
 }
 
 func (s *Server) GetSentMessages(ctx context.Context, req *generated.GetSentMessagesRequest) (*generated.GetSentMessagesResponse, error) {
+	log.Println("Getting sent messages for:", req.Nickname)
+
 	messages, err := s.messagesService.GetSentMessages(ctx, req.Nickname)
 	if err != nil {
 		return nil, err

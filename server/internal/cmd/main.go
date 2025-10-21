@@ -39,7 +39,7 @@ func NewGRPCServer(port string) *GRPCServer {
 }
 
 func (s *GRPCServer) Start() error {
-	listener, err := net.Listen("tcp", "localhost:"+s.port)
+	listener, err := net.Listen("tcp", "0.0.0.0:"+s.port)
 	if err != nil {
 		return fmt.Errorf("failed to listen on port %s: %w", s.port, err)
 	}
