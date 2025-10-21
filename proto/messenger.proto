@@ -1,0 +1,74 @@
+syntax = "proto3";
+
+package generated;
+
+option go_package = "github.com/kuzin57/grpc-chat/server/internal/generated";
+
+service Messenger {
+    rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
+    rpc GetReceivedMessages(GetReceivedMessagesRequest) returns (GetReceivedMessagesResponse);
+    rpc GetSentMessages(GetSentMessagesRequest) returns (GetSentMessagesResponse);
+    
+    // // Server-Side Streaming: получение новых сообщений в реальном времени
+    // rpc StreamReceivedMessages(StreamReceivedMessagesRequest) returns (stream Message);
+    
+    // // Bidirectional Streaming: чат в реальном времени
+    // rpc ChatStream(stream ChatMessage) returns (stream ChatMessage);
+}
+
+message SendMessageRequest {
+    string message = 1;
+    string from_nickname = 2;
+    string to_nickname = 3;
+}
+
+message SendMessageResponse {
+    string message_id = 1;
+}
+
+message GetReceivedMessagesRequest {
+    string nickname = 1;
+}
+
+message GetReceivedMessagesResponse {
+    repeated Message messages = 1;
+}
+
+message GetSentMessagesRequest {
+    string nickname = 1;
+}
+
+message GetSentMessagesResponse {
+    repeated Message messages = 1;
+}
+
+message Message {
+    string id = 1;
+    string content = 2;
+    string from_nickname = 3;
+    string to_nickname = 4;
+    string created_at = 5;
+}
+
+// Server-Side Streaming
+message StreamReceivedMessagesRequest {
+    string nickname = 1;
+}
+
+// Bidirectional Streaming
+message ChatMessage {
+    string id = 1;
+    string content = 2;
+    string from_nickname = 3;
+    string to_nickname = 4;
+    string created_at = 5;
+    ChatMessageType type = 6;
+}
+
+enum ChatMessageType {
+    MESSAGE = 0;
+    USER_JOINED = 1;
+    USER_LEFT = 2;
+    TYPING = 3;
+    STOP_TYPING = 4;
+}

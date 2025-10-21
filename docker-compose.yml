@@ -1,0 +1,40 @@
+services:
+  grpc-server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    container_name: grpc-chat-server
+    ports:
+      - "8080:8080"
+    environment:
+      - GRPC_PORT=8080
+    restart: unless-stopped
+    networks:
+      - grpc-network
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "8080"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Пример клиента (опционально)
+  grpc-client:
+    build:
+      context: .
+      dockerfile: client/Dockerfile
+    container_name: grpc-chat-client
+    depends_on:
+      - grpc-server
+    networks:
+      - grpc-network
+    profiles:
+      - client
+
+networks:
+  grpc-network:
+    driver: bridge
+
+volumes:
+  # Можно добавить volume для логов или данных
+  server-logs:
