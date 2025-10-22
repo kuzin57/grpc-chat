@@ -1,2 +1,3 @@
 *.pb.go
 client/generated/*
+*_pb2.py

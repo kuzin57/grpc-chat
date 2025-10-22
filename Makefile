@@ -6,11 +6,15 @@ proto:
 	rm -rf github.com internal
 
 proto-python:
-	python3 -m grpc_tools.protoc --proto_path=proto --python_out=client/generated --grpc_python_out=client/generated proto/messenger.proto
+	python3 -m grpc_tools.protoc --proto_path=proto --python_out=./client --grpc_python_out=./client proto/messenger.proto
+	mv client/messenger_pb2.py client/generated/
+	mv client/messenger_pb2_grpc.py client/generated/
+	cd client && ln -sf generated/messenger_pb2.py messenger_pb2.py
 
 clean:
 	rm -rf bin/
 	rm -f server/internal/generated/*.pb.go
+	rm -f client/messenger_pb2.py
 
 docker-build:
 	docker-compose build
