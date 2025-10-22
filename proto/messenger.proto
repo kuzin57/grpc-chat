@@ -42,14 +42,6 @@ message Message {
     string created_at = 5;
 }
 
-message ChatMessage {
-    string id = 1;
-    string content = 2;
-    string chat_id = 3;
-    string created_at = 5;
-    ChatMessageType type = 6;
-}
-
 message GetUserChatsRequest {
     string nickname = 1;
 }
@@ -90,10 +82,22 @@ message JoinChatResponse {
     bool success = 1;
 }
 
+message ChatMessage {
+    string id = 1;
+    string content = 2;
+    string nickname = 3;
+    string chat_id = 4;
+    string created_at = 5;
+    ChatMessageType type = 6;
+}
+
 enum ChatMessageType {
     MESSAGE = 0;
     USER_JOINED = 1;
     USER_LEFT = 2;
+    CHAT_CREATED = 3;
+    USER_GOT_IN = 4;
+    USER_CONNECTED = 5;
 }
 
 message SetMessagesReadRequest {

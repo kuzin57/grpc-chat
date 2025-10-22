@@ -2,19 +2,27 @@ package server
 
 import (
 	"context"
+	"sync"
 
 	"github.com/kuzin57/grpc-chat/server/internal/entities"
 	"github.com/kuzin57/grpc-chat/server/internal/generated"
 )
 
 type MessengerService interface {
-	SendMessage(ctx context.Context, text, nickname, chatID string) (string, error)
+	SendMessage(ctx context.Context, text, nickname, chatID string) (entities.Message, error)
 	GetMessages(ctx context.Context, chatID string) ([]*entities.Message, error)
 	GetUserChats(ctx context.Context, nickname string) ([]*entities.Chat, map[string]*entities.ChatUser, error)
 	CreateChat(ctx context.Context, name, nickname string) (string, error)
 	AddUserToChat(ctx context.Context, chatID, nickname string) error
 	RemoveUserFromChat(ctx context.Context, chatID, nickname string) error
 	SetMessagesRead(ctx context.Context, chatID, nickname string) error
+	Broadcast(
+		ctx context.Context,
+		message entities.Message,
+		messageType generated.ChatMessageType,
+		streams map[string]generated.Messenger_ChatStreamServer,
+		mu *sync.RWMutex,
+	) error
 }
 
 type MessengerServer interface {

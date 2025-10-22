@@ -12,4 +12,5 @@ type Repository interface {
 	GetUserChats(nickname string) ([]*entities.Chat, error)
 	SetMessagesRead(chatID, nickname string) error
 	GetChatUsers(nickname string, chatsIDs []string) (map[string]*entities.ChatUser, error)
+	GetUsersByChatID(chatID string) ([]*entities.ChatUser, error)
 }

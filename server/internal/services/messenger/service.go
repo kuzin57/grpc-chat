@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/kuzin57/grpc-chat/server/internal/entities"
+	"github.com/kuzin57/grpc-chat/server/internal/generated"
 	"github.com/kuzin57/grpc-chat/server/internal/repository"
 	"github.com/kuzin57/grpc-chat/server/internal/utils"
 )
@@ -21,10 +23,10 @@ func NewService(repo Repository) *Service {
 	}
 }
 
-func (s *Service) SendMessage(ctx context.Context, text, nickname, chatID string) (string, error) {
+func (s *Service) SendMessage(ctx context.Context, text, nickname, chatID string) (entities.Message, error) {
 	_, err := s.repo.GetChat(chatID)
 	if err != nil {
-		return "", err
+		return entities.Message{}, err
 	}
 
 	message := entities.Message{
@@ -38,10 +40,12 @@ func (s *Service) SendMessage(ctx context.Context, text, nickname, chatID string
 
 	messageID, err := s.repo.CreateMessage(message)
 	if err != nil {
-		return "", err
+		return entities.Message{}, err
 	}
 
-	return messageID, nil
+	message.ID = messageID
+
+	return message, nil
 }
 
 func (s *Service) GetMessages(ctx context.Context, chatID string) ([]*entities.Message, error) {
@@ -98,4 +102,93 @@ func (s *Service) AddUserToChat(ctx context.Context, chatID, nickname string) er
 
 func (s *Service) RemoveUserFromChat(ctx context.Context, chatID, nickname string) error {
 	return s.repo.RemoveUserFromChat(chatID, nickname)
+}
+
+func (s *Service) Broadcast(
+	ctx context.Context,
+	message entities.Message,
+	messageType generated.ChatMessageType,
+	streams map[string]generated.Messenger_ChatStreamServer,
+	mu *sync.RWMutex,
+) error {
+	users, err := s.repo.GetUsersByChatID(message.ChatID)
+	if err != nil {
+		return err
+	}
+
+	var wg sync.WaitGroup
+	errorChan := make(chan error, len(users))
+
+	for _, user := range users {
+		if user.Nickname == message.Nickname {
+			continue
+		}
+
+		wg.Add(1)
+		go func(userNickname string) {
+			defer wg.Done()
+
+			mu.RLock()
+			stream, ok := streams[userNickname]
+			mu.RUnlock()
+
+			if !ok {
+				return
+			}
+
+			log.Println("Sending message to user", userNickname, "message", message)
+
+			sendCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			select {
+			case <-sendCtx.Done():
+				log.Printf("Send context cancelled for user %s", userNickname)
+				errorChan <- sendCtx.Err()
+				return
+			default:
+				err := stream.Send(&generated.ChatMessage{
+					Id:        message.ID,
+					Content:   message.Content,
+					Nickname:  message.Nickname,
+					ChatId:    message.ChatID,
+					CreatedAt: message.CreatedAt.Format(time.RFC3339),
+					Type:      messageType,
+				})
+				if err != nil {
+					log.Printf("Failed to send message to user %s: %v", userNickname, err)
+
+					if err.Error() == "rpc error: code = Canceled desc = context canceled" ||
+						err.Error() == "rpc error: code = Unavailable desc = transport is closing" ||
+						err.Error() == "rpc error: code = DeadlineExceeded desc = context deadline exceeded" {
+						log.Printf("Removing closed stream for user %s", userNickname)
+						mu.Lock()
+						delete(streams, userNickname)
+						mu.Unlock()
+					} else {
+						log.Printf("Temporary error for user %s, keeping stream: %v", userNickname, err)
+					}
+					errorChan <- err
+				} else {
+					errorChan <- nil
+				}
+			}
+		}(user.Nickname)
+	}
+
+	wg.Wait()
+	close(errorChan)
+
+	hasErrors := false
+	for err := range errorChan {
+		if err != nil {
+			hasErrors = true
+		}
+	}
+
+	if hasErrors {
+		log.Printf("Broadcast completed with some errors for chat %s", message.ChatID)
+	}
+
+	return nil
 }

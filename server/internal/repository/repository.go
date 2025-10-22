@@ -71,6 +71,12 @@ func (r *Repository) AddUserToChat(chatID, nickname string) error {
 		return ErrChatNotFound
 	}
 
+	for _, user := range r.chatUsers[chatID] {
+		if user.Nickname == nickname {
+			return nil
+		}
+	}
+
 	r.chatUsers[chatID] = append(r.chatUsers[chatID], &entities.ChatUser{
 		ChatID:   chatID,
 		Nickname: nickname,
@@ -157,4 +163,11 @@ func (r *Repository) SetMessagesRead(chatID, nickname string) error {
 	}
 
 	return nil
+}
+
+func (r *Repository) GetUsersByChatID(chatID string) ([]*entities.ChatUser, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	return r.chatUsers[chatID], nil
 }
