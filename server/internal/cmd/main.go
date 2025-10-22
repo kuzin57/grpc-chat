@@ -10,9 +10,9 @@ import (
 	"syscall"
 
 	"github.com/kuzin57/grpc-chat/server/internal/generated"
-	messageRepo "github.com/kuzin57/grpc-chat/server/internal/repositories/messages"
+	"github.com/kuzin57/grpc-chat/server/internal/repository"
 	"github.com/kuzin57/grpc-chat/server/internal/server"
-	"github.com/kuzin57/grpc-chat/server/internal/services/messages"
+	"github.com/kuzin57/grpc-chat/server/internal/services/messenger"
 	"google.golang.org/grpc"
 	"gopkg.in/yaml.v2"
 )
@@ -24,10 +24,10 @@ type GRPCServer struct {
 
 func NewGRPCServer(port string) *GRPCServer {
 	var (
-		grpcServer      = grpc.NewServer()
-		messageRepo     = messageRepo.NewRepository()
-		messagesService = messages.NewService(messageRepo)
-		server          = server.NewServer(messagesService)
+		grpcServer       = grpc.NewServer()
+		repository       = repository.NewRepository()
+		messengerService = messenger.NewService(repository)
+		server           = server.NewServer(messengerService)
 	)
 
 	generated.RegisterMessengerServer(grpcServer, server)

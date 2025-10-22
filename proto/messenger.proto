@@ -6,69 +6,101 @@ option go_package = "github.com/kuzin57/grpc-chat/server/internal/generated";
 
 service Messenger {
     rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
-    rpc GetReceivedMessages(GetReceivedMessagesRequest) returns (GetReceivedMessagesResponse);
-    rpc GetSentMessages(GetSentMessagesRequest) returns (GetSentMessagesResponse);
+    rpc GetMessages(GetMessagesRequest) returns (GetMessagesResponse);
+    rpc GetUserChats(GetUserChatsRequest) returns (GetUserChatsResponse);
+    rpc CreateChat(CreateChatRequest) returns (CreateChatResponse);
+    rpc LeaveChat(LeaveChatRequest) returns (LeaveChatResponse);
+    rpc JoinChat(JoinChatRequest) returns (JoinChatResponse);
+    rpc SetMessagesRead(SetMessagesReadRequest) returns (SetMessagesReadResponse);
     
-    // // Server-Side Streaming: получение новых сообщений в реальном времени
-    // rpc StreamReceivedMessages(StreamReceivedMessagesRequest) returns (stream Message);
-    
-    // // Bidirectional Streaming: чат в реальном времени
-    // rpc ChatStream(stream ChatMessage) returns (stream ChatMessage);
+    rpc ChatStream(stream ChatMessage) returns (stream ChatMessage);
 }
 
 message SendMessageRequest {
     string message = 1;
-    string from_nickname = 2;
-    string to_nickname = 3;
+    string chat_id = 2;
+    string nickname = 3;
 }
 
 message SendMessageResponse {
     string message_id = 1;
 }
 
-message GetReceivedMessagesRequest {
-    string nickname = 1;
+message GetMessagesRequest {
+    string chat_id = 1;
 }
 
-message GetReceivedMessagesResponse {
-    repeated Message messages = 1;
-}
-
-message GetSentMessagesRequest {
-    string nickname = 1;
-}
-
-message GetSentMessagesResponse {
+message GetMessagesResponse {
     repeated Message messages = 1;
 }
 
 message Message {
     string id = 1;
     string content = 2;
-    string from_nickname = 3;
-    string to_nickname = 4;
+    string chat_id = 3;
+    string nickname = 4;
     string created_at = 5;
 }
 
-// Server-Side Streaming
-message StreamReceivedMessagesRequest {
-    string nickname = 1;
-}
-
-// Bidirectional Streaming
 message ChatMessage {
     string id = 1;
     string content = 2;
-    string from_nickname = 3;
-    string to_nickname = 4;
+    string chat_id = 3;
     string created_at = 5;
     ChatMessageType type = 6;
+}
+
+message GetUserChatsRequest {
+    string nickname = 1;
+}
+
+message GetUserChatsResponse {
+    repeated ChatStats chats = 2;
+}
+
+message ChatStats {
+    string chat_id = 1;
+    int32 new_messages = 2;
+}
+
+message CreateChatRequest {
+    string name = 1;
+    string nickname = 2;
+}
+
+message CreateChatResponse {
+    string chat_id = 1;
+}
+
+message LeaveChatRequest {
+    string chat_id = 1;
+    string nickname = 2;
+}
+
+message LeaveChatResponse {
+    bool success = 1;
+}
+
+message JoinChatRequest {
+    string chat_id = 1;
+    string nickname = 2;
+}
+
+message JoinChatResponse {
+    bool success = 1;
 }
 
 enum ChatMessageType {
     MESSAGE = 0;
     USER_JOINED = 1;
     USER_LEFT = 2;
-    TYPING = 3;
-    STOP_TYPING = 4;
+}
+
+message SetMessagesReadRequest {
+    string chat_id = 1;
+    string nickname = 2;
+}
+
+message SetMessagesReadResponse {
+    bool success = 1;
 }
