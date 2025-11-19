@@ -10,7 +10,6 @@ import (
 	"github.com/kuzin57/grpc-chat/server/internal/entities"
 	"github.com/kuzin57/grpc-chat/server/internal/generated"
 	"github.com/kuzin57/grpc-chat/server/internal/repository"
-	"github.com/kuzin57/grpc-chat/server/internal/utils"
 )
 
 type Service struct {
@@ -24,7 +23,7 @@ func NewService(repo Repository) *Service {
 }
 
 func (s *Service) SendMessage(ctx context.Context, text, nickname, chatID string) (entities.Message, error) {
-	_, err := s.repo.GetChat(chatID)
+	_, err := s.repo.GetChat(ctx, chatID)
 	if err != nil {
 		return entities.Message{}, err
 	}
@@ -38,7 +37,7 @@ func (s *Service) SendMessage(ctx context.Context, text, nickname, chatID string
 
 	log.Println("Sending message:", text, "chat", chatID)
 
-	messageID, err := s.repo.CreateMessage(message)
+	messageID, err := s.repo.CreateMessage(ctx, message)
 	if err != nil {
 		return entities.Message{}, err
 	}
@@ -49,24 +48,24 @@ func (s *Service) SendMessage(ctx context.Context, text, nickname, chatID string
 }
 
 func (s *Service) GetMessages(ctx context.Context, chatID string) ([]*entities.Message, error) {
-	_, err := s.repo.GetChat(chatID)
+	_, err := s.repo.GetChat(ctx, chatID)
 	if err != nil {
 		return nil, err
 	}
 
 	log.Println("Getting messages for", chatID)
-	return s.repo.GetMessages(chatID)
+	return s.repo.GetMessages(ctx, chatID)
 }
 
-func (s *Service) GetUserChats(ctx context.Context, nickname string) ([]*entities.Chat, map[string]*entities.ChatUser, error) {
-	chats, err := s.repo.GetUserChats(nickname)
+func (s *Service) GetUserChats(ctx context.Context, nickname string) ([]string, map[string]*entities.ChatUser, error) {
+	chats, err := s.repo.GetUserChats(ctx, nickname)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	log.Println("Getting chat users for", nickname, "chats", utils.MapSlice(chats, func(chat *entities.Chat) string { return chat.ID }))
+	log.Println("Getting chat users for", nickname, "chats", chats)
 
-	chatUsers, err := s.repo.GetChatUsers(nickname, utils.MapSlice(chats, func(chat *entities.Chat) string { return chat.ID }))
+	chatUsers, err := s.repo.GetChatsUsers(ctx, nickname, chats)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -75,33 +74,28 @@ func (s *Service) GetUserChats(ctx context.Context, nickname string) ([]*entitie
 }
 
 func (s *Service) SetMessagesRead(ctx context.Context, chatID, nickname string) error {
-	return s.repo.SetMessagesRead(chatID, nickname)
+	return s.repo.SetMessagesRead(ctx, chatID, nickname)
 }
 
 func (s *Service) CreateChat(ctx context.Context, name, nickname string) (string, error) {
-	existingChat, err := s.repo.GetChat(name)
+	existingChat, err := s.repo.GetChat(ctx, name)
 	if err != nil && !errors.Is(err, repository.ErrChatNotFound) {
 		return "", err
 	}
 
-	if existingChat != nil {
+	if existingChat != "" {
 		return "", ErrChatAlreadyExists
 	}
 
-	chat := entities.Chat{
-		ID:        name,
-		CreatedAt: time.Now(),
-	}
-
-	return s.repo.CreateChat(chat, nickname)
+	return s.repo.CreateChat(ctx, name, nickname)
 }
 
 func (s *Service) AddUserToChat(ctx context.Context, chatID, nickname string) error {
-	return s.repo.AddUserToChat(chatID, nickname)
+	return s.repo.AddUserToChat(ctx, chatID, nickname)
 }
 
 func (s *Service) RemoveUserFromChat(ctx context.Context, chatID, nickname string) error {
-	return s.repo.RemoveUserFromChat(chatID, nickname)
+	return s.repo.RemoveUserFromChat(ctx, chatID, nickname)
 }
 
 func (s *Service) Broadcast(
@@ -111,7 +105,7 @@ func (s *Service) Broadcast(
 	streams map[string]generated.Messenger_ChatStreamServer,
 	mu *sync.RWMutex,
 ) error {
-	users, err := s.repo.GetUsersByChatID(message.ChatID)
+	users, err := s.repo.GetUsersByChatID(ctx, message.ChatID)
 	if err != nil {
 		return err
 	}

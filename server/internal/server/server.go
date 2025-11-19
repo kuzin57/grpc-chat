@@ -88,15 +88,15 @@ func (s *Server) GetUserChats(ctx context.Context, req *generated.GetUserChatsRe
 	}
 
 	return &generated.GetUserChatsResponse{
-		Chats: utils.MapSliceIf(chats, func(chat *entities.Chat) (*generated.ChatStats, bool) {
-			chatUser, ok := chatUsers[chat.ID]
+		Chats: utils.MapSliceIf(chats, func(chatID string) (*generated.ChatStats, bool) {
+			chatUser, ok := chatUsers[chatID]
 			if !ok {
 				return nil, false
 			}
 
 			return &generated.ChatStats{
 				NewMessages: int32(chatUser.NewMessages),
-				ChatId:      chat.ID,
+				ChatId:      chatID,
 			}, true
 		}),
 	}, nil

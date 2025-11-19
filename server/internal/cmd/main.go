@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/kuzin57/grpc-chat/server/internal/config"
 	"github.com/kuzin57/grpc-chat/server/internal/generated"
 	"github.com/kuzin57/grpc-chat/server/internal/repository"
 	"github.com/kuzin57/grpc-chat/server/internal/server"
@@ -22,10 +23,17 @@ type GRPCServer struct {
 	port   string
 }
 
-func NewGRPCServer(port string) *GRPCServer {
+func NewGRPCServer(config *config.Config) (*GRPCServer, error) {
 	var (
-		grpcServer       = grpc.NewServer()
-		repository       = repository.NewRepository()
+		grpcServer = grpc.NewServer()
+	)
+
+	repository, err := repository.NewRepository(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create repository: %w", err)
+	}
+
+	var (
 		messengerService = messenger.NewService(repository)
 		server           = server.NewServer(messengerService)
 	)
@@ -34,8 +42,8 @@ func NewGRPCServer(port string) *GRPCServer {
 
 	return &GRPCServer{
 		server: grpcServer,
-		port:   port,
-	}
+		port:   config.Port,
+	}, nil
 }
 
 func (s *GRPCServer) Start() error {
@@ -62,13 +70,13 @@ type Config struct {
 	Port string `yaml:"port"`
 }
 
-func mustLoadConfig(confPath string) *Config {
+func mustLoadConfig(confPath string) *config.Config {
 	content, err := os.ReadFile(confPath)
 	if err != nil {
 		panic(err)
 	}
 
-	cfg := &Config{}
+	cfg := &config.Config{}
 
 	if err := yaml.Unmarshal(content, cfg); err != nil {
 		panic(err)
@@ -85,7 +93,10 @@ func main() {
 
 	cfg := mustLoadConfig(confPath)
 
-	grpcServer := NewGRPCServer(cfg.Port)
+	grpcServer, err := NewGRPCServer(cfg)
+	if err != nil {
+		log.Fatalf("failed to create gRPC server: %v", err)
+	}
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)

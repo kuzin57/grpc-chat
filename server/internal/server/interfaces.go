@@ -11,7 +11,7 @@ import (
 type MessengerService interface {
 	SendMessage(ctx context.Context, text, nickname, chatID string) (entities.Message, error)
 	GetMessages(ctx context.Context, chatID string) ([]*entities.Message, error)
-	GetUserChats(ctx context.Context, nickname string) ([]*entities.Chat, map[string]*entities.ChatUser, error)
+	GetUserChats(ctx context.Context, nickname string) ([]string, map[string]*entities.ChatUser, error)
 	CreateChat(ctx context.Context, name, nickname string) (string, error)
 	AddUserToChat(ctx context.Context, chatID, nickname string) error
 	RemoveUserFromChat(ctx context.Context, chatID, nickname string) error
