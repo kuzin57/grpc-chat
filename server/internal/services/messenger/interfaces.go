@@ -17,4 +17,5 @@ type Repository interface {
 	SetMessagesRead(ctx context.Context, chatID, nickname string) error
 	GetChatsUsers(ctx context.Context, nickname string, chatsIDs []string) (map[string]*entities.ChatUser, error)
 	GetUsersByChatID(ctx context.Context, chatID string) ([]*entities.ChatUser, error)
+	SetTTLToChat(ctx context.Context, chatID string, ttl int32) error
 }

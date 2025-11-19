@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"reflect"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/kuzin57/grpc-chat/server/internal/config"
@@ -14,6 +15,7 @@ import (
 
 const (
 	scanChatUsersChunkSize = 100
+	chatMessagesChunkSize  = 100
 )
 
 type Repository struct {
@@ -275,4 +277,42 @@ func (r *Repository) SetMessagesRead(ctx context.Context, chatID, nickname strin
 
 func (r *Repository) GetUsersByChatID(ctx context.Context, chatID string) ([]*entities.ChatUser, error) {
 	return lookupByKeyPattern[entities.ChatUser](ctx, r.redisClient, utils.BuildChatUserPatternByChat(chatID))
+}
+
+// TTL in minutes
+func (r *Repository) SetTTLToChat(ctx context.Context, chatID string, ttl int32) error {
+	var (
+		messageKeys []string
+		cursor      uint64
+	)
+
+	for {
+		keys, nextCursor, err := r.redisClient.Scan(ctx, cursor, utils.BuildChatMessagePatternByChat(chatID), chatMessagesChunkSize).Result()
+		if err != nil {
+			return err
+		}
+
+		messageKeys = append(messageKeys, keys...)
+
+		if cursor == 0 {
+			break
+		}
+
+		cursor = nextCursor
+	}
+
+	if len(messageKeys) == 0 {
+		return nil
+	}
+
+	for _, messageKey := range messageKeys {
+		_, err := r.redisClient.Expire(ctx, messageKey, time.Duration(ttl)*time.Minute).Result()
+		if err != nil {
+			return err
+		}
+	}
+
+	log.Println("Set TTL to chat", chatID, "ttl", ttl)
+
+	return nil
 }

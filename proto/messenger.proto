@@ -89,6 +89,7 @@ message ChatMessage {
     string chat_id = 4;
     string created_at = 5;
     ChatMessageType type = 6;
+    optional int32 ttl = 7;
 }
 
 enum ChatMessageType {
@@ -98,6 +99,7 @@ enum ChatMessageType {
     CHAT_CREATED = 3;
     USER_GOT_IN = 4;
     USER_CONNECTED = 5;
+    SET_TTL_TO_CHAT = 6;
 }
 
 message SetMessagesReadRequest {

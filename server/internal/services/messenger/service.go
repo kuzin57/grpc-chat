@@ -186,3 +186,7 @@ func (s *Service) Broadcast(
 
 	return nil
 }
+
+func (s *Service) SetTTLToChat(ctx context.Context, chatID string, ttl int32) error {
+	return s.repo.SetTTLToChat(ctx, chatID, ttl)
+}

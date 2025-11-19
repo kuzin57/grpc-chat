@@ -23,6 +23,7 @@ type MessengerService interface {
 		streams map[string]generated.Messenger_ChatStreamServer,
 		mu *sync.RWMutex,
 	) error
+	SetTTLToChat(ctx context.Context, chatID string, ttl int32) error
 }
 
 type MessengerServer interface {

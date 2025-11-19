@@ -187,11 +187,18 @@ func (s *Server) ChatStream(stream generated.Messenger_ChatStreamServer) error {
 		log.Println("[Chat stream] message type:", req.Type)
 
 		switch req.Type {
-		case generated.ChatMessageType_MESSAGE:
+		case generated.ChatMessageType_MESSAGE, generated.ChatMessageType_SET_TTL_TO_CHAT:
 			message, err = s.messengerService.SendMessage(ctx, req.Content, req.Nickname, req.ChatId)
 			if err != nil {
 				log.Println("Chat stream error:", err)
 				continue
+			}
+
+			if req.Ttl != nil {
+				if err = s.messengerService.SetTTLToChat(ctx, req.ChatId, *req.Ttl); err != nil {
+					log.Println("Chat stream error:", err)
+					continue
+				}
 			}
 
 			s.mu.Lock()
