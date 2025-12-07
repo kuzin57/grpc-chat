@@ -1,16 +1,21 @@
 package messenger
 
-import "github.com/kuzin57/grpc-chat/server/internal/entities"
+import (
+	"context"
+
+	"github.com/kuzin57/grpc-chat/server/internal/entities"
+)
 
 type Repository interface {
-	CreateMessage(message entities.Message) (string, error)
-	GetMessages(chatID string) ([]*entities.Message, error)
-	CreateChat(chat entities.Chat, nickname string) (string, error)
-	AddUserToChat(chatID, nickname string) error
-	RemoveUserFromChat(chatID, nickname string) error
-	GetChat(chatID string) (*entities.Chat, error)
-	GetUserChats(nickname string) ([]*entities.Chat, error)
-	SetMessagesRead(chatID, nickname string) error
-	GetChatUsers(nickname string, chatsIDs []string) (map[string]*entities.ChatUser, error)
-	GetUsersByChatID(chatID string) ([]*entities.ChatUser, error)
+	CreateMessage(ctx context.Context, message entities.Message) (string, error)
+	GetMessages(ctx context.Context, chatID string) ([]*entities.Message, error)
+	CreateChat(ctx context.Context, chatID, nickname string) (string, error)
+	AddUserToChat(ctx context.Context, chatID, nickname string) error
+	RemoveUserFromChat(ctx context.Context, chatID, nickname string) error
+	GetChat(ctx context.Context, chatID string) (string, error)
+	GetUserChats(ctx context.Context, nickname string) ([]string, error)
+	SetMessagesRead(ctx context.Context, chatID, nickname string) error
+	GetChatsUsers(ctx context.Context, nickname string, chatsIDs []string) (map[string]*entities.ChatUser, error)
+	GetUsersByChatID(ctx context.Context, chatID string) ([]*entities.ChatUser, error)
+	SetTTLToChat(ctx context.Context, chatID string, ttl int32) error
 }

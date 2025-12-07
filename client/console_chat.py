@@ -287,6 +287,17 @@ class StreamingConsoleChat:
                 elif message.type == messenger_pb2.USER_GOT_IN:
                     self.add_notification_to_list(f"🚪 {message.nickname} вошел в чат {message.chat_id}")
                     self.refresh_display()
+                elif message.type == messenger_pb2.SET_TTL_TO_CHAT:
+                    ttl_text = ""
+                    if message.HasField('ttl'):
+                        ttl_minutes = message.ttl
+                        ttl_text = f"⏱️ {message.nickname} установил TTL на {ttl_minutes} минут для чата {message.chat_id}"
+                    else:
+                        ttl_text = f"⏱️ {message.nickname} установил TTL для чата {message.chat_id}"
+                    self.add_notification_to_list(ttl_text)
+                    if message.content:
+                        self.add_room_message(message.chat_id, message.content, message.nickname)
+                    self.refresh_display()
                 
                 self.get_user_color(message.nickname)
                 
@@ -387,6 +398,7 @@ class StreamingConsoleChat:
         print("  /leave             - покинуть текущий чат")
         print("  /history           - показать историю сообщений")
         print("  /current           - информация о текущем чате")
+        print("  /ttl <минуты>      - установить TTL для чата (в минутах)")
         print()
         print("🔄 СТРИМИНГ:")
         print("  Все действия автоматически отправляются через стрим")
@@ -494,6 +506,35 @@ class StreamingConsoleChat:
                 print("=" * 40)
             else:
                 print("\n🎨 Пользователи с цветами не найдены")
+            return
+        elif command == "/ttl":
+            if not self.current_chat_id:
+                print("❌ Вы не в чате")
+                return
+            if len(parts) < 2:
+                print("❌ Укажите количество минут: /ttl <минуты>")
+                return
+            try:
+                minutes = int(parts[1])
+                if minutes < 0:
+                    print("❌ Количество минут должно быть положительным числом")
+                    return
+                
+                # Отправляем сообщение с типом SET_TTL_TO_CHAT
+                if hasattr(self, 'message_queue') and self.message_queue is not None:
+                    ttl_message = messenger_pb2.ChatMessage(
+                        content=f"TTL установлен на {minutes} минут",
+                        nickname=self.nickname,
+                        chat_id=self.current_chat_id,
+                        type=messenger_pb2.SET_TTL_TO_CHAT,
+                        ttl=minutes
+                    )
+                    self.message_queue.append(ttl_message)
+                    self.add_notification_to_list(f"⏱️ TTL установлен на {minutes} минут для чата")
+                else:
+                    print("❌ Стриминг не активен")
+            except ValueError:
+                print("❌ Количество минут должно быть числом")
             return
         else:
             if self.current_chat_id:

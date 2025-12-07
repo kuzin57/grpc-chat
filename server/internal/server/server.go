@@ -88,15 +88,15 @@ func (s *Server) GetUserChats(ctx context.Context, req *generated.GetUserChatsRe
 	}
 
 	return &generated.GetUserChatsResponse{
-		Chats: utils.MapSliceIf(chats, func(chat *entities.Chat) (*generated.ChatStats, bool) {
-			chatUser, ok := chatUsers[chat.ID]
+		Chats: utils.MapSliceIf(chats, func(chatID string) (*generated.ChatStats, bool) {
+			chatUser, ok := chatUsers[chatID]
 			if !ok {
 				return nil, false
 			}
 
 			return &generated.ChatStats{
 				NewMessages: int32(chatUser.NewMessages),
-				ChatId:      chat.ID,
+				ChatId:      chatID,
 			}, true
 		}),
 	}, nil
@@ -187,11 +187,18 @@ func (s *Server) ChatStream(stream generated.Messenger_ChatStreamServer) error {
 		log.Println("[Chat stream] message type:", req.Type)
 
 		switch req.Type {
-		case generated.ChatMessageType_MESSAGE:
+		case generated.ChatMessageType_MESSAGE, generated.ChatMessageType_SET_TTL_TO_CHAT:
 			message, err = s.messengerService.SendMessage(ctx, req.Content, req.Nickname, req.ChatId)
 			if err != nil {
 				log.Println("Chat stream error:", err)
 				continue
+			}
+
+			if req.Ttl != nil {
+				if err = s.messengerService.SetTTLToChat(ctx, req.ChatId, *req.Ttl); err != nil {
+					log.Println("Chat stream error:", err)
+					continue
+				}
 			}
 
 			s.mu.Lock()
