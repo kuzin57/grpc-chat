@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package generated;
 
+import "google/protobuf/timestamp.proto";
+
 option go_package = "github.com/kuzin57/grpc-chat/server/internal/generated";
 
 service Messenger {
@@ -14,6 +16,51 @@ service Messenger {
     rpc SetMessagesRead(SetMessagesReadRequest) returns (SetMessagesReadResponse);
     
     rpc ChatStream(stream ChatMessage) returns (stream ChatMessage);
+    rpc SearchMessages(SearchMessagesRequest) returns (SearchMessagesResponse);
+    rpc ScrollMessages(ScrollMessagesRequest) returns (ScrollMessagesResponse);
+    rpc GetChatAnalytics(GetChatAnalyticsRequest) returns (GetChatAnalyticsResponse);
+}
+
+message GetChatAnalyticsRequest {
+    string chat_id = 1;
+}
+
+message GetChatAnalyticsResponse {
+    int64 users_count = 1;
+    int64 messages_count = 2;
+    repeated WordStat words = 3;
+    repeated TagStat tags = 4;
+}
+
+message WordStat {
+    string word = 1;
+    int64 count = 2;
+}
+
+message TagStat {
+    string tag = 1;
+    int64 count = 2;
+}
+
+message ScrollMessagesRequest {
+    string scroll_id = 1;
+}
+
+message ScrollMessagesResponse {
+    repeated Message messages = 1;
+    string scroll_id = 2;
+}
+
+message SearchMessagesRequest {
+    string query = 1;
+    string chat_id = 2;
+    int64 offset = 3;
+    repeated string tags = 4;
+}
+
+message SearchMessagesResponse {
+    repeated Message messages = 1;
+    string scroll_id = 2;
 }
 
 message SendMessageRequest {
@@ -39,7 +86,7 @@ message Message {
     string content = 2;
     string chat_id = 3;
     string nickname = 4;
-    string created_at = 5;
+    google.protobuf.Timestamp created_at = 5;
 }
 
 message GetUserChatsRequest {
@@ -87,7 +134,7 @@ message ChatMessage {
     string content = 2;
     string nickname = 3;
     string chat_id = 4;
-    string created_at = 5;
+    google.protobuf.Timestamp created_at = 5;
     ChatMessageType type = 6;
     optional int32 ttl = 7;
 }

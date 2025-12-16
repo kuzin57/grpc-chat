@@ -24,6 +24,9 @@ type MessengerService interface {
 		mu *sync.RWMutex,
 	) error
 	SetTTLToChat(ctx context.Context, chatID string, ttl int32) error
+	SearchMessages(ctx context.Context, chatID, query string, tags []string, offset int) ([]*entities.Message, string, error)
+	ScrollMessages(ctx context.Context, scrollID string) ([]*entities.Message, string, error)
+	GetChatStats(ctx context.Context, chatID string) (entities.ChatStats, error)
 }
 
 type MessengerServer interface {

@@ -10,10 +10,11 @@ import (
 
 	"github.com/kuzin57/grpc-chat/server/internal/entities"
 	"github.com/kuzin57/grpc-chat/server/internal/generated"
-	"github.com/kuzin57/grpc-chat/server/internal/repository"
+	"github.com/kuzin57/grpc-chat/server/internal/repositories"
 	"github.com/kuzin57/grpc-chat/server/internal/utils"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 var (
@@ -42,7 +43,7 @@ func (s *Server) SendMessage(ctx context.Context, req *generated.SendMessageRequ
 
 	message, err := s.messengerService.SendMessage(ctx, req.Message, req.Nickname, req.ChatId)
 	if err != nil {
-		if errors.Is(err, repository.ErrChatNotFound) {
+		if errors.Is(err, repositories.ErrChatNotFound) {
 			return nil, status.Errorf(codes.NotFound, "chat not found")
 		}
 
@@ -59,7 +60,7 @@ func (s *Server) GetMessages(ctx context.Context, req *generated.GetMessagesRequ
 
 	messages, err := s.messengerService.GetMessages(ctx, req.ChatId)
 	if err != nil {
-		if errors.Is(err, repository.ErrChatNotFound) {
+		if errors.Is(err, repositories.ErrChatNotFound) {
 			return nil, status.Errorf(codes.NotFound, "chat not found")
 		}
 
@@ -73,7 +74,7 @@ func (s *Server) GetMessages(ctx context.Context, req *generated.GetMessagesRequ
 				Content:   message.Content,
 				Nickname:  message.Nickname,
 				ChatId:    message.ChatID,
-				CreatedAt: message.CreatedAt.Format(time.RFC3339),
+				CreatedAt: timestamppb.New(message.CreatedAt),
 			}
 		}),
 	}, nil
@@ -176,15 +177,9 @@ func (s *Server) ChatStream(stream generated.Messenger_ChatStreamServer) error {
 			return err
 		}
 
-		message := entities.Message{
-			Content:   req.Content,
-			Nickname:  req.Nickname,
-			ChatID:    req.ChatId,
-			CreatedAt: time.Now(),
-		}
-
-		log.Println("[Chat stream] message:", message)
 		log.Println("[Chat stream] message type:", req.Type)
+
+		var message entities.Message
 
 		switch req.Type {
 		case generated.ChatMessageType_MESSAGE, generated.ChatMessageType_SET_TTL_TO_CHAT:
@@ -259,7 +254,7 @@ func (s *Server) ChatStream(stream generated.Messenger_ChatStreamServer) error {
 					Content:   message.Content,
 					Nickname:  message.Nickname,
 					ChatId:    message.ChatID,
-					CreatedAt: message.CreatedAt.Format(time.RFC3339),
+					CreatedAt: timestamppb.New(message.CreatedAt),
 					Type:      generated.ChatMessageType_MESSAGE,
 				}); err != nil {
 					log.Println("Chat stream error:", err)
@@ -275,6 +270,7 @@ func (s *Server) ChatStream(stream generated.Messenger_ChatStreamServer) error {
 			s.mu.Unlock()
 
 			log.Println("Chat stream user left:", req.ChatId, "nickname", req.Nickname)
+			continue
 		default:
 			log.Println("Unknown chat message type:", req.Type)
 			continue
@@ -289,4 +285,74 @@ func (s *Server) ChatStream(stream generated.Messenger_ChatStreamServer) error {
 	}
 
 	return nil
+}
+
+func (s *Server) SearchMessages(ctx context.Context, req *generated.SearchMessagesRequest) (*generated.SearchMessagesResponse, error) {
+	log.Println("Searching messages for:", req.Query, "tags:", req.Tags)
+
+	messages, scrollID, err := s.messengerService.SearchMessages(ctx, req.ChatId, req.Query, req.Tags, int(req.Offset))
+	if err != nil {
+		return nil, err
+	}
+
+	return &generated.SearchMessagesResponse{
+		Messages: utils.MapSlice(messages, func(message *entities.Message) *generated.Message {
+			return &generated.Message{
+				Id:        message.ID,
+				Content:   message.Content,
+				Nickname:  message.Nickname,
+				ChatId:    message.ChatID,
+				CreatedAt: timestamppb.New(message.CreatedAt),
+			}
+		}),
+		ScrollId: scrollID,
+	}, nil
+}
+
+func (s *Server) ScrollMessages(ctx context.Context, req *generated.ScrollMessagesRequest) (*generated.ScrollMessagesResponse, error) {
+	log.Println("Scrolling messages for:", req.ScrollId)
+
+	messages, scrollID, err := s.messengerService.ScrollMessages(ctx, req.ScrollId)
+	if err != nil {
+		return nil, err
+	}
+
+	return &generated.ScrollMessagesResponse{
+		Messages: utils.MapSlice(messages, func(message *entities.Message) *generated.Message {
+			return &generated.Message{
+				Id:        message.ID,
+				Content:   message.Content,
+				Nickname:  message.Nickname,
+				ChatId:    message.ChatID,
+				CreatedAt: timestamppb.New(message.CreatedAt),
+			}
+		}),
+		ScrollId: scrollID,
+	}, nil
+}
+
+func (s *Server) GetChatAnalytics(ctx context.Context, req *generated.GetChatAnalyticsRequest) (*generated.GetChatAnalyticsResponse, error) {
+	log.Println("Getting chat analytics for:", req.ChatId)
+
+	stats, err := s.messengerService.GetChatStats(ctx, req.ChatId)
+	if err != nil {
+		return nil, err
+	}
+
+	return &generated.GetChatAnalyticsResponse{
+		UsersCount:    stats.UsersCount,
+		MessagesCount: stats.MessagesCount,
+		Words: utils.MapSlice(stats.Words, func(word entities.WordStat) *generated.WordStat {
+			return &generated.WordStat{
+				Word:  word.Word,
+				Count: word.Count,
+			}
+		}),
+		Tags: utils.MapSlice(stats.Tags, func(tag entities.TagStat) *generated.TagStat {
+			return &generated.TagStat{
+				Tag:   tag.Tag,
+				Count: tag.Count,
+			}
+		}),
+	}, nil
 }

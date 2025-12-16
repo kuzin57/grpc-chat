@@ -4,3 +4,9 @@ redis:
   port: 6379
   password: redis
   user: redis
+opensearch:
+  host: opensearch
+  port: 9200
+  password: Lalala1234567@
+  user: admin
+use_opensearch: true
