@@ -38,3 +38,5 @@ python3 fill_chat.py <chat_id> <nickname> --count <count>
 ```
 python3 console_chat.py --server localhost:8080
 ```
+
+Video recording link - https://drive.google.com/file/d/18syzagnyrYdFxkotlLtJGA62c2hV2WS9/view?usp=sharing
