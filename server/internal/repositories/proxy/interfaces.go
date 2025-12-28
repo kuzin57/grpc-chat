@@ -1,4 +1,4 @@
-package messenger
+package adapter
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"github.com/kuzin57/grpc-chat/server/internal/entities"
 )
 
-type Repository interface {
+type ChatRepository interface {
 	CreateMessage(ctx context.Context, message entities.Message) (string, error)
 	GetMessages(ctx context.Context, chatID string) ([]*entities.Message, error)
 	CreateChat(ctx context.Context, chatID, nickname string) (string, error)

@@ -18,6 +18,58 @@ services:
       retries: 5
       start_period: 10s
 
+  opensearch:
+    image: opensearchproject/opensearch:latest
+    container_name: grpc-chat-opensearch
+    environment:
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
+      - plugins.security.disabled=true
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=Lalala1234567@
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    ports:
+      - "9200:9200"
+      - "9600:9600"
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+    restart: unless-stopped
+    networks:
+      - grpc-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:latest
+    container_name: grpc-chat-opensearch-dashboards
+    ports:
+      - "5601:5601"
+    environment:
+      - OPENSEARCH_HOSTS=http://opensearch:9200
+      - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - grpc-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5601/api/status || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
   grpc-server:
     build:
       context: .
@@ -34,6 +86,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      opensearch:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - grpc-network
@@ -44,7 +98,6 @@ services:
       retries: 3
       start_period: 40s
 
-  # Пример клиента (опционально)
   grpc-client:
     build:
       context: .
@@ -65,3 +118,4 @@ volumes:
   # Можно добавить volume для логов или данных
   server-logs:
   redis-data:
+  opensearch-data:

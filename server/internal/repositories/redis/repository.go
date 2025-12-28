@@ -1,4 +1,4 @@
-package repository
+package cache
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/kuzin57/grpc-chat/server/internal/config"
 	"github.com/kuzin57/grpc-chat/server/internal/entities"
+	"github.com/kuzin57/grpc-chat/server/internal/repositories"
 	"github.com/kuzin57/grpc-chat/server/internal/utils"
 	"github.com/redis/go-redis/v9"
 )
@@ -23,6 +24,17 @@ type Repository struct {
 }
 
 func NewRepository(config *config.Config) (*Repository, error) {
+	redisClient, err := initRedisClient(config)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Repository{
+		redisClient: redisClient,
+	}, nil
+}
+
+func initRedisClient(config *config.Config) (*redis.Client, error) {
 	redisClient := redis.NewClient(&redis.Options{
 		Addr:     config.Redis.Host + ":" + config.Redis.Port,
 		Password: config.Redis.Password,
@@ -39,9 +51,7 @@ func NewRepository(config *config.Config) (*Repository, error) {
 		return nil, err
 	}
 
-	return &Repository{
-		redisClient: redisClient,
-	}, nil
+	return redisClient, nil
 }
 
 func setStructToKey(ctx context.Context, redisClient *redis.Client, key string, value interface{}) error {
@@ -129,7 +139,7 @@ func (r *Repository) GetChat(ctx context.Context, chatID string) (string, error)
 	}
 
 	if len(chatKeys) == 0 {
-		return "", ErrChatNotFound
+		return "", repositories.ErrChatNotFound
 	}
 
 	return utils.ExtractChatIDFromChatUserKey(chatKeys[0]), nil
@@ -173,7 +183,7 @@ func (r *Repository) AddUserToChat(ctx context.Context, chatID, nickname string)
 	}
 
 	if len(chatKeys) == 0 {
-		return ErrChatNotFound
+		return repositories.ErrChatNotFound
 	}
 
 	err = setStructToKey(ctx, r.redisClient, utils.BuildChatUserKey(chatID, nickname), &entities.ChatUser{
@@ -315,4 +325,30 @@ func (r *Repository) SetTTLToChat(ctx context.Context, chatID string, ttl int32)
 	log.Println("Set TTL to chat", chatID, "ttl", ttl)
 
 	return nil
+}
+
+func (r *Repository) SearchMessages(ctx context.Context, chatID, query string, tags []string, offset int) ([]*entities.Message, string, error) {
+	// not implemented for Redis
+	return nil, "", nil
+}
+
+func (r *Repository) ScrollMessages(ctx context.Context, scrollID string) ([]*entities.Message, string, error) {
+	// not implemented for Redis
+	return nil, "", nil
+}
+
+func (r *Repository) GetUsersCount(ctx context.Context, chatID string) (int64, error) {
+	return 0, nil
+}
+
+func (r *Repository) GetMessagesCount(ctx context.Context, chatID string) (int64, error) {
+	return 0, nil
+}
+
+func (r *Repository) GetTopWords(ctx context.Context, chatID string, limit int) ([]entities.WordStat, error) {
+	return nil, nil
+}
+
+func (r *Repository) GetTopTags(ctx context.Context, chatID string, limit int) ([]entities.TagStat, error) {
+	return nil, nil
 }

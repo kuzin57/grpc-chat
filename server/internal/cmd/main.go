@@ -11,7 +11,7 @@ import (
 
 	"github.com/kuzin57/grpc-chat/server/internal/config"
 	"github.com/kuzin57/grpc-chat/server/internal/generated"
-	"github.com/kuzin57/grpc-chat/server/internal/repository"
+	adapter "github.com/kuzin57/grpc-chat/server/internal/repositories/proxy"
 	"github.com/kuzin57/grpc-chat/server/internal/server"
 	"github.com/kuzin57/grpc-chat/server/internal/services/messenger"
 	"google.golang.org/grpc"
@@ -28,7 +28,7 @@ func NewGRPCServer(config *config.Config) (*GRPCServer, error) {
 		grpcServer = grpc.NewServer()
 	)
 
-	repository, err := repository.NewRepository(config)
+	repository, err := adapter.NewRepository(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create repository: %w", err)
 	}

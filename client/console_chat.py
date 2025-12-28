@@ -5,6 +5,7 @@ import threading
 import time
 import os
 from datetime import datetime
+from google.protobuf.timestamp_pb2 import Timestamp
 from generated import messenger_pb2
 from generated import messenger_pb2_grpc
 import grpc
@@ -16,7 +17,6 @@ class StreamingConsoleChat:
         self.channel = None
         self.stub = None
         self.nickname = None
-        self.room_messages = {}
         self.running = False
         self.current_chat_id = None
         self.user_chats = {}
@@ -26,6 +26,16 @@ class StreamingConsoleChat:
         self.available_colors = [31, 32, 33, 34, 35, 36, 91, 92, 93, 94, 95, 96]
         self.stream_thread = None
         self.stream_stub = None
+        self.search_mode = False
+        self.search_scroll_id = None
+        self.search_results = []
+        self.search_scroll_position = 0  # позиция скроллинга в результатах поиска
+        # Скроллинг сообщений
+        self.cached_messages = {}  # chat_id -> список всех загруженных сообщений
+        self.scroll_position = {}  # chat_id -> текущая позиция просмотра (индекс)
+        self.scroll_scroll_id = {}  # chat_id -> scrollID для текущего скроллинга
+        self.scroll_offset = {}  # chat_id -> текущий offset для подгрузки
+        self.messages_per_page = 20  # количество сообщений на странице
         
     def connect(self):
         try:
@@ -50,6 +60,12 @@ class StreamingConsoleChat:
             self.user_colors[nickname] = self.available_colors[color_index]
         return self.user_colors[nickname]
     
+    def timestamp_to_datetime(self, timestamp):
+        """Конвертирует protobuf Timestamp в datetime объект"""
+        if timestamp is None:
+            return datetime.now()
+        return datetime.fromtimestamp(timestamp.seconds + timestamp.nanos / 1e9)
+    
     def send_message(self, message, chat_id=None):
         if chat_id is None:
             chat_id = self.current_chat_id
@@ -66,26 +82,34 @@ class StreamingConsoleChat:
                 type=messenger_pb2.MESSAGE
             )
             
+            # Оптимистичное обновление: добавляем сообщение в кэш сразу
+            if chat_id not in self.cached_messages:
+                self.cached_messages[chat_id] = []
+            
+            now = datetime.now()
+            # Временно добавляем сообщение с пустым ID (будет заменено при получении через стрим)
+            temp_message = {
+                'id': '',  # Будет установлен когда придет с сервера
+                'content': message,
+                'nickname': self.nickname,
+                'created_at': now,
+                'timestamp': now.strftime("%H:%M:%S")
+            }
+            self.cached_messages[chat_id].append(temp_message)
+            
+            # Обновляем позицию скроллинга чтобы показать новое сообщение
+            scroll_pos = self.scroll_position.get(chat_id, 0)
+            total = len(self.cached_messages[chat_id])
+            if scroll_pos >= total - self.messages_per_page - 1:
+                self.scroll_position[chat_id] = max(0, total - self.messages_per_page)
+            
             if hasattr(self, 'message_queue'):
                 self.message_queue.append(chat_message)
-                
-            self.add_room_message(chat_id, message, self.nickname, is_sent=True)
+            
+            self.refresh_display()
             
         except Exception as e:
             self.add_notification_to_list(f"❌ Ошибка отправки сообщения: {e}")
-    
-    def add_room_message(self, chat_id, content, nickname, is_sent=False):
-        if chat_id not in self.room_messages:
-            self.room_messages[chat_id] = []
-        
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        self.room_messages[chat_id].append({
-            'content': content,
-            'nickname': nickname,
-            'timestamp': timestamp,
-            'is_sent': is_sent
-        })
-        print(f"[DEBUG] Добавлено сообщение в чат {chat_id}: {content} от {nickname}")
     
     def add_notification_to_list(self, message):
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -206,7 +230,12 @@ class StreamingConsoleChat:
         chat_name = self.chat_names.get(chat_id, chat_id)
         self.add_notification_to_list(f"✅ Переключились в чат: {chat_name} ({chat_id})")
         
-        self.get_chat_messages(chat_id)
+        # Если кэш уже есть, просто обновляем позицию на последние сообщения
+        if chat_id in self.cached_messages and len(self.cached_messages[chat_id]) > 0:
+            self.scroll_position[chat_id] = max(0, len(self.cached_messages[chat_id]) - self.messages_per_page)
+        else:
+            # Загружаем сообщения и инициализируем кэш
+            self.get_chat_messages(chat_id)
         return True
     
     def get_chat_messages(self, chat_id):
@@ -214,14 +243,283 @@ class StreamingConsoleChat:
             request = messenger_pb2.GetMessagesRequest(chat_id=chat_id)
             response = self.stub.GetMessages(request)
             
-            self.room_messages[chat_id] = []
+            # Инициализируем кэш сообщений для скроллинга
+            self.cached_messages[chat_id] = []
             
+            # GetMessages возвращает сообщения в порядке desc (новые первыми)
+            # Для скроллинга нужен порядок asc (старые первыми), поэтому реверсируем
+            messages_list = []
             for msg in response.messages:
-                self.add_room_message(chat_id, msg.content, msg.nickname)
+                created_at_dt = self.timestamp_to_datetime(msg.created_at)
+                messages_list.append({
+                    'id': msg.id,
+                    'content': msg.content,
+                    'nickname': msg.nickname,
+                    'created_at': created_at_dt,
+                    'timestamp': created_at_dt.strftime("%H:%M:%S")
+                })
                 self.get_user_color(msg.nickname)
+            
+            # Реверсируем для хранения в порядке asc (старые первыми)
+            self.cached_messages[chat_id] = list(reversed(messages_list))
+            
+            # Инициализируем позицию скроллинга (показываем последние сообщения)
+            self.scroll_position[chat_id] = max(0, len(self.cached_messages[chat_id]) - self.messages_per_page)
+            self.scroll_scroll_id[chat_id] = None
+            self.scroll_offset[chat_id] = len(self.cached_messages[chat_id])
                 
         except grpc.RpcError as e:
             self.add_notification_to_list(f"❌ Ошибка получения сообщений: {e}")
+    
+    def load_more_messages(self, chat_id):
+        """Загружает следующую порцию сообщений с сервера"""
+        try:
+            # Пробуем использовать scroll, если он активен
+            if self.scroll_scroll_id.get(chat_id):
+                try:
+                    request = messenger_pb2.ScrollMessagesRequest(scroll_id=self.scroll_scroll_id[chat_id])
+                    response = self.stub.ScrollMessages(request)
+                    
+                    if response.messages:
+                        new_messages = []
+                        for msg in response.messages:
+                            created_at_dt = self.timestamp_to_datetime(msg.created_at)
+                            new_messages.append({
+                                'id': msg.id,
+                                'content': msg.content,
+                                'nickname': msg.nickname,
+                                'created_at': created_at_dt,
+                                'timestamp': created_at_dt.strftime("%H:%M:%S")
+                            })
+                            self.get_user_color(msg.nickname)
+                        
+                        # Добавляем в начало кэша (старые сообщения)
+                        self.cached_messages[chat_id] = new_messages + self.cached_messages[chat_id]
+                        self.scroll_scroll_id[chat_id] = response.scroll_id if response.scroll_id else None
+                        self.scroll_offset[chat_id] = self.scroll_offset.get(chat_id, 0) + len(new_messages)
+                        return True
+                except grpc.RpcError:
+                    # Scroll протух, используем search с offset
+                    self.scroll_scroll_id[chat_id] = None
+            
+            # Используем search с offset для подгрузки
+            request = messenger_pb2.SearchMessagesRequest(
+                chat_id=chat_id,
+                query="",
+                tags=[],
+                offset=self.scroll_offset.get(chat_id, 0)
+            )
+            response = self.stub.SearchMessages(request)
+            
+            if response.messages:
+                new_messages = []
+                for msg in response.messages:
+                    created_at_dt = self.timestamp_to_datetime(msg.created_at)
+                    new_messages.append({
+                        'id': msg.id,
+                        'content': msg.content,
+                        'nickname': msg.nickname,
+                        'created_at': created_at_dt,
+                        'timestamp': created_at_dt.strftime("%H:%M:%S")
+                    })
+                    self.get_user_color(msg.nickname)
+                
+                # Добавляем в начало кэша (старые сообщения)
+                self.cached_messages[chat_id] = new_messages + self.cached_messages[chat_id]
+                self.scroll_scroll_id[chat_id] = response.scroll_id if response.scroll_id else None
+                self.scroll_offset[chat_id] = self.scroll_offset.get(chat_id, 0) + len(new_messages)
+                return True
+            
+            return False
+        except grpc.RpcError as e:
+            self.add_notification_to_list(f"❌ Ошибка загрузки сообщений: {e}")
+            return False
+    
+    def scroll_up(self, chat_id):
+        """Прокручивает вверх (показывает более старые сообщения)"""
+        if chat_id not in self.cached_messages:
+            return
+        
+        current_pos = self.scroll_position.get(chat_id, 0)
+        
+        # Если мы в начале кэша, пытаемся загрузить еще
+        if current_pos == 0:
+            if self.load_more_messages(chat_id):
+                # После загрузки позиция остается 0, но кэш увеличился
+                pass
+            else:
+                self.add_notification_to_list("📄 Больше старых сообщений нет")
+                return
+        
+        # Прокручиваем вверх на messages_per_page
+        new_pos = max(0, current_pos - self.messages_per_page)
+        self.scroll_position[chat_id] = new_pos
+        self.add_notification_to_list(f"⬆️ Прокрутка вверх (позиция {new_pos})")
+    
+    def scroll_down(self, chat_id):
+        """Прокручивает вниз (показывает более новые сообщения)"""
+        if chat_id not in self.cached_messages:
+            return
+        
+        current_pos = self.scroll_position.get(chat_id, 0)
+        total_messages = len(self.cached_messages[chat_id])
+        
+        # Прокручиваем вниз на messages_per_page
+        new_pos = min(total_messages - self.messages_per_page, current_pos + self.messages_per_page)
+        
+        if new_pos == current_pos:
+            self.add_notification_to_list("📄 Вы уже внизу")
+            return
+        
+        self.scroll_position[chat_id] = new_pos
+        self.add_notification_to_list(f"⬇️ Прокрутка вниз (позиция {new_pos})")
+    
+    def parse_search_query(self, query):
+        """Парсит поисковый запрос, извлекая текст и теги"""
+        import re
+        # Находим все теги вида #tag, поддерживаем Unicode символы (русские буквы и др.)
+        # Используем \w который в Python 3 поддерживает Unicode по умолчанию
+        # Добавляем явную поддержку кириллицы и других Unicode букв
+        tag_pattern = r'#([\w\u0400-\u04FF\u0500-\u052F]+)'  # \w + кириллица + расширенная кириллица
+        tags = re.findall(tag_pattern, query)
+        # Удаляем теги из текста запроса
+        text_query = re.sub(tag_pattern, '', query).strip()
+        return text_query, tags
+    
+    def search_messages(self, query):
+        """Выполняет поиск сообщений по тексту и тегам"""
+        try:
+            text_query, tags = self.parse_search_query(query)
+            request = messenger_pb2.SearchMessagesRequest(query=text_query, chat_id=self.current_chat_id, tags=tags, offset=0)
+            response = self.stub.SearchMessages(request)
+            
+            self.search_results = []
+            for msg in response.messages:
+                created_at_dt = self.timestamp_to_datetime(msg.created_at)
+                self.search_results.append({
+                    'id': msg.id,
+                    'content': msg.content,
+                    'nickname': msg.nickname,
+                    'chat_id': msg.chat_id,
+                    'created_at': created_at_dt.strftime("%Y-%m-%d %H:%M:%S")
+                })
+                self.get_user_color(msg.nickname)
+            
+            # Инициализируем позицию скроллинга (показываем первые результаты - самые новые)
+            # При сортировке desc: индекс 0 = самое новое, индекс N = самое старое
+            self.search_scroll_position = 0
+            
+            self.search_scroll_id = response.scroll_id if response.scroll_id else None
+            
+            if self.search_scroll_id:
+                self.add_notification_to_list(f"✅ Найдено {len(self.search_results)} сообщений (показаны самые новые). Используйте /down для просмотра более старых сообщений")
+            else:
+                self.add_notification_to_list(f"✅ Найдено {len(self.search_results)} сообщений")
+            
+            return True
+        except grpc.RpcError as e:
+            self.add_notification_to_list(f"❌ Ошибка поиска: {e}")
+            return False
+    
+    def scroll_search_results(self):
+        """Загружает следующую пачку результатов поиска через scroll API
+        
+        Scroll API всегда загружает более старые результаты (при сортировке desc),
+        поэтому результаты добавляются в конец списка.
+        """
+        if not self.search_scroll_id:
+            self.add_notification_to_list("❌ Нет активного поиска или результаты закончились")
+            return False
+        
+        try:
+            request = messenger_pb2.ScrollMessagesRequest(scroll_id=self.search_scroll_id)
+            response = self.stub.ScrollMessages(request)
+            
+            # Сохраняем новый scroll_id, даже если сообщений нет
+            new_scroll_id = response.scroll_id if response.scroll_id else None
+            
+            if not response.messages:
+                # Если нет сообщений и нет нового scroll_id, значит результаты закончились
+                self.search_scroll_id = None
+                self.add_notification_to_list("📄 Больше результатов нет")
+                return False
+            
+            # Сохраняем ВСЕ сообщения из ответа
+            new_results = []
+            for msg in response.messages:
+                created_at_dt = self.timestamp_to_datetime(msg.created_at)
+                new_results.append({
+                    'id': msg.id,
+                    'content': msg.content,
+                    'nickname': msg.nickname,
+                    'chat_id': msg.chat_id,
+                    'created_at': created_at_dt.strftime("%Y-%m-%d %H:%M:%S")
+                })
+                self.get_user_color(msg.nickname)
+            
+            # Scroll API всегда загружает более старые результаты (при сортировке desc)
+            # Добавляем их в конец списка
+            self.search_results.extend(new_results)
+            self.search_scroll_id = new_scroll_id
+            
+            self.add_notification_to_list(f"✅ Загружено еще {len(new_results)} сообщений (всего: {len(self.search_results)})")
+            return True
+        except grpc.RpcError as e:
+            self.search_scroll_id = None
+            self.add_notification_to_list(f"❌ Ошибка загрузки результатов: {e}")
+            return False
+    
+    def get_chat_analytics(self):
+        """Получает и отображает аналитику по чату"""
+        try:
+            request = messenger_pb2.GetChatAnalyticsRequest(chat_id=self.current_chat_id)
+            response = self.stub.GetChatAnalytics(request)
+            
+            self.display_analytics(response)
+            
+        except grpc.RpcError as e:
+            self.add_notification_to_list(f"❌ Ошибка получения аналитики: {e}")
+        except Exception as e:
+            self.add_notification_to_list(f"❌ Ошибка: {e}")
+    
+    def display_analytics(self, analytics):
+        """Красиво отображает аналитику по чату"""
+        chat_name = self.chat_names.get(self.current_chat_id, self.current_chat_id)
+        
+        print("\n" + "=" * 80)
+        print(f"📊 АНАЛИТИКА ЧАТА: {chat_name}")
+        print("=" * 80)
+        
+        # Общая статистика
+        print("\n📈 ОБЩАЯ СТАТИСТИКА:")
+        print(f"  👥 Пользователей: {analytics.users_count}")
+        print(f"  💬 Сообщений: {analytics.messages_count}")
+        
+        # Топ слов
+        if analytics.words:
+            print("\n🔤 ТОП СЛОВ:")
+            max_words = min(10, len(analytics.words))
+            for i, word_stat in enumerate(analytics.words[:max_words], 1):
+                bar_length = min(30, int(word_stat.count * 30 / analytics.words[0].count)) if analytics.words else 0
+                bar = "█" * bar_length
+                print(f"  {i:2d}. {word_stat.word:20s} [{word_stat.count:5d}] {bar}")
+        else:
+            print("\n🔤 ТОП СЛОВ: Нет данных")
+        
+        # Топ тегов
+        if analytics.tags:
+            print("\n🏷️  ТОП ТЕГОВ:")
+            max_tags = min(10, len(analytics.tags))
+            for i, tag_stat in enumerate(analytics.tags[:max_tags], 1):
+                bar_length = min(30, int(tag_stat.count * 30 / analytics.tags[0].count)) if analytics.tags else 0
+                bar = "█" * bar_length
+                tag_display = f"#{tag_stat.tag}" if not tag_stat.tag.startswith("#") else tag_stat.tag
+                print(f"  {i:2d}. {tag_display:20s} [{tag_stat.count:5d}] {bar}")
+        else:
+            print("\n🏷️  ТОП ТЕГОВ: Нет данных")
+        
+        print("\n" + "=" * 80)
+        input("\nНажмите Enter для продолжения...")
     
     def start_streaming(self):
         try:
@@ -272,8 +570,39 @@ class StreamingConsoleChat:
         try:
             for message in self.stream_stub:
                 if message.type == messenger_pb2.MESSAGE:
-                    print(f"\n[DEBUG] Получено сообщение: {message.content} от {message.nickname} в чат {message.chat_id}")
-                    self.add_room_message(message.chat_id, message.content, message.nickname)
+                    created_at_dt = self.timestamp_to_datetime(message.created_at)
+                    # Добавляем новое сообщение в кэш для скроллинга
+                    if message.chat_id not in self.cached_messages:
+                        self.cached_messages[message.chat_id] = []
+                    
+                    cached = self.cached_messages[message.chat_id]
+                    # Проверяем, не является ли это нашим оптимистично добавленным сообщением
+                    # (смотрим по последнему сообщению с пустым ID и совпадающим контентом/никнеймом)
+                    if cached and cached[-1].get('id') == '' and cached[-1]['content'] == message.content and cached[-1]['nickname'] == message.nickname:
+                        # Заменяем временное сообщение на реальное с ID
+                        cached[-1] = {
+                            'id': message.id,
+                            'content': message.content,
+                            'nickname': message.nickname,
+                            'created_at': created_at_dt,
+                            'timestamp': created_at_dt.strftime("%H:%M:%S")
+                        }
+                    else:
+                        # Добавляем новое сообщение
+                        self.cached_messages[message.chat_id].append({
+                            'id': message.id,
+                            'content': message.content,
+                            'nickname': message.nickname,
+                            'created_at': created_at_dt,
+                            'timestamp': created_at_dt.strftime("%H:%M:%S")
+                        })
+                        # Если мы внизу, обновляем позицию чтобы показать новое сообщение
+                        scroll_pos = self.scroll_position.get(message.chat_id, 0)
+                        total = len(self.cached_messages[message.chat_id])
+                        if scroll_pos >= total - self.messages_per_page - 1:
+                            self.scroll_position[message.chat_id] = max(0, total - self.messages_per_page)
+                    
+                    self.get_user_color(message.nickname)
                     self.refresh_display()
                 elif message.type == messenger_pb2.USER_JOINED:
                     self.add_notification_to_list(f"👋 {message.nickname} присоединился к чату {message.chat_id}")
@@ -296,7 +625,17 @@ class StreamingConsoleChat:
                         ttl_text = f"⏱️ {message.nickname} установил TTL для чата {message.chat_id}"
                     self.add_notification_to_list(ttl_text)
                     if message.content:
-                        self.add_room_message(message.chat_id, message.content, message.nickname)
+                        created_at_dt = self.timestamp_to_datetime(message.created_at) if message.HasField('created_at') else datetime.now()
+                        # Добавляем сообщение в кэш, если есть
+                        if message.chat_id not in self.cached_messages:
+                            self.cached_messages[message.chat_id] = []
+                        self.cached_messages[message.chat_id].append({
+                            'id': message.id if message.HasField('id') else '',
+                            'content': message.content,
+                            'nickname': message.nickname,
+                            'created_at': created_at_dt,
+                            'timestamp': created_at_dt.strftime("%H:%M:%S")
+                        })
                     self.refresh_display()
                 
                 self.get_user_color(message.nickname)
@@ -343,7 +682,37 @@ class StreamingConsoleChat:
                 print(f"  {notification}")
             print()
         
-        if self.current_chat_id is None:
+        if self.search_mode:
+            print("🔍 РЕЖИМ ПОИСКА")
+            print("=" * 40)
+            if self.search_results:
+                # Отображаем окно результатов с учетом позиции скроллинга
+                start_idx = self.search_scroll_position
+                end_idx = min(start_idx + self.messages_per_page, len(self.search_results))
+                
+                for i in range(start_idx, end_idx):
+                    msg = self.search_results[i]
+                    color = self.get_user_color(msg['nickname'])
+                    chat_name = self.chat_names.get(msg['chat_id'], msg['chat_id'])
+                    print(f"  \033[{color}m[{msg['created_at']}] {msg['nickname']} ({chat_name}): {msg['content']}\033[0m")
+                
+                # Показываем индикатор позиции
+                if len(self.search_results) > self.messages_per_page:
+                    print(f"\n  📍 Позиция: {start_idx}-{end_idx} из {len(self.search_results)} загружено", end="")
+                    if self.search_scroll_id:
+                        print(" (еще доступны)")
+                    else:
+                        print(" (все загружено)")
+                    if self.search_scroll_position > 0:
+                        print(f"  ⬆️ Используйте /up для просмотра более новых сообщений")
+                    if end_idx < len(self.search_results) or self.search_scroll_id:
+                        print(f"  ⬇️ Используйте /down для просмотра более старых сообщений")
+            else:
+                print("  Результаты поиска пусты")
+            print()
+            print("-" * 80)
+            print("🔍 Введите запрос (текст и теги #tag) или команду (/up, /down, /exit_search): ", end="", flush=True)
+        elif self.current_chat_id is None:
             print("🏠 ГЛАВНОЕ МЕНЮ")
             print("=" * 40)
             print("Доступные действия:")
@@ -353,32 +722,43 @@ class StreamingConsoleChat:
             print("  /help - помощь")
             print("  /exit - выход")
             print()
+            print("-" * 80)
+            print("💬 Введите команду: ", end="", flush=True)
         else:
             chat_name = self.chat_names.get(self.current_chat_id, self.current_chat_id)
             print(f"💬 ЧАТ: {chat_name} ({self.current_chat_id})")
             print("=" * 40)
             
-            if self.current_chat_id in self.room_messages:
-                for msg in self.room_messages[self.current_chat_id][-20:]:  # Последние 20 сообщений
+            # Отображаем сообщения из кэша с учетом позиции скроллинга
+            if self.current_chat_id in self.cached_messages:
+                cached = self.cached_messages[self.current_chat_id]
+                scroll_pos = self.scroll_position.get(self.current_chat_id, max(0, len(cached) - self.messages_per_page))
+                
+                # Показываем окно сообщений
+                start_idx = scroll_pos
+                end_idx = min(start_idx + self.messages_per_page, len(cached))
+                
+                for i in range(start_idx, end_idx):
+                    msg = cached[i]
                     color = self.get_user_color(msg['nickname'])
-                    if msg['is_sent']:
-                        print(f"  \033[{color}m[{msg['timestamp']}] {msg['nickname']}: {msg['content']}\033[0m")
-                    else:
-                        print(f"  \033[{color}m[{msg['timestamp']}] {msg['nickname']}: {msg['content']}\033[0m")
+                    print(f"  \033[{color}m[{msg['timestamp']}] {msg['nickname']}: {msg['content']}\033[0m")
+                
+                # Показываем индикатор позиции
+                if len(cached) > self.messages_per_page:
+                    print(f"\n  📍 Позиция: {start_idx}-{end_idx} из {len(cached)} сообщений")
+                    if scroll_pos > 0:
+                        print(f"  ⬆️ Используйте /up для просмотра старых сообщений")
+                    if end_idx < len(cached):
+                        print(f"  ⬇️ Используйте /down для просмотра новых сообщений")
             print()
-        
-        print("-" * 80)
-        if self.current_chat_id:
+            print("-" * 80)
             print(f"💬 Введите сообщение или команду (чат: {self.chat_names.get(self.current_chat_id, self.current_chat_id)}): ", end="", flush=True)
-        else:
-            print("💬 Введите команду: ", end="", flush=True)
     
     def clear_screen(self):
         os.system('clear' if os.name == 'posix' else 'cls')
     
     def refresh_display(self):
         if self.current_chat_id:
-            print(f"[DEBUG] Обновляем отображение для чата {self.current_chat_id}")
             self.display_messages()
     
     def show_help(self):
@@ -399,6 +779,16 @@ class StreamingConsoleChat:
         print("  /history           - показать историю сообщений")
         print("  /current           - информация о текущем чате")
         print("  /ttl <минуты>      - установить TTL для чата (в минутах)")
+        print("  /search            - войти в режим поиска по чату")
+        print("  /analytics         - показать аналитику по чату")
+        print("  /up                - прокрутить вверх (старые сообщения)")
+        print("  /down              - прокрутить вниз (новые сообщения)")
+        print()
+        print("🔍 РЕЖИМ ПОИСКА:")
+        print("  Введите запрос с текстом и тегами (#tag)")
+        print("  /up                - прокрутить вверх (предыдущие результаты)")
+        print("  /down              - прокрутить вниз (следующие результаты, автоматически загружает новые при необходимости)")
+        print("  /exit_search       - выйти из режима поиска")
         print()
         print("🔄 СТРИМИНГ:")
         print("  Все действия автоматически отправляются через стрим")
@@ -491,7 +881,13 @@ class StreamingConsoleChat:
             print(f"  Название: {chat_name}")
             print(f"  ID: {self.current_chat_id}")
             print(f"  Новых сообщений: {new_messages}")
-            print(f"  Всего сообщений: {len(self.room_messages.get(self.current_chat_id, []))}")
+            print(f"  Всего сообщений: {len(self.cached_messages.get(self.current_chat_id, []))}")
+            return
+        elif command == "/analytics":
+            if not self.current_chat_id:
+                print("❌ Вы не в чате")
+                return
+            self.get_chat_analytics()
             return
         elif command == "/notifications":
             self.notifications = []
@@ -536,8 +932,97 @@ class StreamingConsoleChat:
             except ValueError:
                 print("❌ Количество минут должно быть числом")
             return
+        elif command == "/search":
+            if not self.current_chat_id:
+                print("❌ Вы не в чате. Сначала присоединитесь к чату через /join")
+                return
+            self.search_mode = True
+            self.search_results = []
+            self.search_scroll_id = None
+            self.search_scroll_position = 0
+            self.add_notification_to_list("🔍 Режим поиска активирован. Введите запрос с текстом и тегами (#tag)")
+            return
+        elif command == "/exit_search":
+            self.search_mode = False
+            self.search_results = []
+            self.search_scroll_id = None
+            self.search_scroll_position = 0
+            self.add_notification_to_list("✅ Выход из режима поиска")
+            return
+        elif command == "/up":
+            if self.search_mode:
+                # Скроллинг вверх в результатах поиска (показываем более новые результаты)
+                current_pos = self.search_scroll_position
+                new_pos = max(0, current_pos - self.messages_per_page)
+                if new_pos == current_pos:
+                    # Если достигли начала загруженных результатов, больше новых результатов нет
+                    # (scroll API не может загрузить более новые результаты, только более старые)
+                    self.add_notification_to_list("📄 Вы уже в начале результатов (показаны самые новые сообщения)")
+                else:
+                    self.search_scroll_position = new_pos
+                    self.add_notification_to_list(f"⬆️ Прокрутка вверх (позиция {new_pos})")
+                self.refresh_display()
+            elif not self.current_chat_id:
+                print("❌ Вы не в чате")
+                return
+            else:
+                self.scroll_up(self.current_chat_id)
+                self.refresh_display()
+            return
+        elif command == "/down":
+            if self.search_mode:
+                # Скроллинг вниз в результатах поиска
+                current_pos = self.search_scroll_position
+                total = len(self.search_results)
+                
+                # Проверяем, достигли ли мы конца загруженных результатов
+                is_at_end = (current_pos + self.messages_per_page >= total)
+                
+                # Если достигли конца загруженных результатов и есть scroll_id, загружаем еще
+                if is_at_end and self.search_scroll_id:
+                    if self.scroll_search_results():
+                        # После загрузки новых результатов обновляем позицию
+                        total = len(self.search_results)
+                        new_pos = min(total - self.messages_per_page, current_pos + self.messages_per_page)
+                        if new_pos != current_pos:
+                            self.search_scroll_position = new_pos
+                            self.add_notification_to_list(f"⬇️ Прокрутка вниз (позиция {new_pos})")
+                        else:
+                            # Если после загрузки позиция не изменилась, значит загрузилось меньше чем messages_per_page
+                            # Прокручиваем на то, что загрузилось
+                            if total > current_pos:
+                                self.search_scroll_position = max(0, total - self.messages_per_page)
+                                self.add_notification_to_list(f"⬇️ Прокрутка вниз (позиция {self.search_scroll_position})")
+                            else:
+                                self.add_notification_to_list("📄 Больше результатов нет")
+                    else:
+                        # Scroll не удался, но может быть scroll_id еще есть (если просто нет результатов в этой порции)
+                        if not self.search_scroll_id:
+                            self.add_notification_to_list("📄 Больше результатов нет")
+                        else:
+                            self.add_notification_to_list("📄 Больше результатов в этой порции")
+                elif is_at_end:
+                    # Достигли конца и нет scroll_id
+                    self.add_notification_to_list("📄 Вы уже в конце результатов")
+                else:
+                    # Прокручиваем вниз по уже загруженным результатам
+                    new_pos = min(total - self.messages_per_page, current_pos + self.messages_per_page)
+                    self.search_scroll_position = new_pos
+                    self.add_notification_to_list(f"⬇️ Прокрутка вниз (позиция {new_pos})")
+                self.refresh_display()
+            elif not self.current_chat_id:
+                print("❌ Вы не в чате")
+                return
+            else:
+                self.scroll_down(self.current_chat_id)
+                self.refresh_display()
+            return
         else:
-            if self.current_chat_id:
+            if self.search_mode:
+                # В режиме поиска обрабатываем запрос
+                if user_input.strip():
+                    self.search_messages(user_input)
+            elif self.current_chat_id:
                 self.send_message(user_input)
             else:
                 print("❌ Выберите чат для отправки сообщения")
